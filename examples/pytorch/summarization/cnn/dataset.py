@@ -1,32 +1,72 @@
 from graph4nlp.pytorch.data.dataset import Text2TextDataItem, Text2TextDataset
 from graph4nlp.pytorch.modules.graph_construction.dependency_graph_construction import DependencyBasedGraphConstruction
+from graph4nlp.pytorch.modules.graph_construction.linear_graph_construction import LinearGraphConstruction
 import torch
 import os
 import json
 from stanfordcorenlp import StanfordCoreNLP
 from multiprocessing import Pool
 import numpy as np
+from graph4nlp.pytorch.modules.utils.padding_utils import pad_2d_vals_no_size
 
 from multiprocessing import Process
 import multiprocessing
 import tqdm
 from graph4nlp.pytorch.modules.utils.vocab_utils import VocabModel, Vocab
+from graph4nlp.pytorch.data.dataset import DataItem, Dataset
+from graph4nlp.pytorch.modules.utils import constants
+
+class Text2TextDataItem_seq2seq(DataItem):
+    def __init__(self, input_text, output_text, tokenizer, share_vocab=True):
+        super(Text2TextDataItem_seq2seq, self).__init__(input_text, tokenizer)
+        self.output_text = output_text
+        self.share_vocab = share_vocab
+
+    def extract(self, lower_case=True):
+        """
+        Returns
+        -------
+        Input tokens and output tokens
+        """
+
+        if lower_case:
+            self.input_text = self.input_text.lower()
+
+        if self.tokenizer is None:
+            input_tokens = self.input_text.strip().split(' ')
+        else:
+            input_tokens = self.tokenizer(self.input_text)
 
 
-class CNNDataset(Text2TextDataset):
-    def __init__(self, root_dir, topology_builder, topology_subdir, graph_type='static',
-                 edge_strategy=None, merge_strategy='tailhead', share_vocab=True, word_emb_size=300,
+        if lower_case:
+            self.output_text = self.output_text.lower()
+
+        if self.tokenizer is None:
+            output_tokens = self.output_text.strip().split(' ')
+        else:
+            output_tokens = self.tokenizer(self.output_text)
+
+        if self.share_vocab:
+            return input_tokens + output_tokens
+        else:
+            return input_tokens, output_tokens
+
+class CNNSeq2SeqDataset(Dataset):
+    def __init__(self, root_dir, topology_builder, topology_subdir,
+                 share_vocab=True, word_emb_size=300,
                  dynamic_graph_type=None,
                  dynamic_init_topology_builder=None,
                  dynamic_init_topology_aux_args=None
                  ):
-        super(CNNDataset, self).__init__(root_dir=root_dir,
-                                         topology_builder=topology_builder, topology_subdir=topology_subdir, graph_type=graph_type,
-                                         edge_strategy=edge_strategy, merge_strategy=merge_strategy,
-                                         share_vocab=share_vocab, word_emb_size=word_emb_size,
-                                         dynamic_graph_type=dynamic_graph_type,
-                                         dynamic_init_topology_builder=dynamic_init_topology_builder,
-                                         dynamic_init_topology_aux_args=dynamic_init_topology_aux_args)
+        self.data_item_type = Text2TextDataItem_seq2seq
+        self.share_vocab = share_vocab
+        super(CNNSeq2SeqDataset, self).__init__(root=root_dir,
+                                                topology_builder=topology_builder,
+                                                topology_subdir=topology_subdir,
+                                                 share_vocab=share_vocab, word_emb_size=word_emb_size,
+                                                 dynamic_graph_type=dynamic_graph_type,
+                                                 dynamic_init_topology_builder=dynamic_init_topology_builder,
+                                                 dynamic_init_topology_aux_args=dynamic_init_topology_aux_args)
 
     @property
     def raw_file_names(self):
@@ -51,8 +91,8 @@ class CNNDataset(Text2TextDataset):
                                        data_set=data_for_vocab,
                                        tokenizer=self.tokenizer,
                                        lower_case=self.lower_case,
-                                       max_word_vocab_size=None,
-                                       min_word_vocab_freq=3,
+                                       max_word_vocab_size=20000,
+                                       min_word_vocab_freq=8,
                                        pretrained_word_emb_file=self.pretrained_word_emb_file,
                                        word_emb_size=300,
                                        share_vocab=self.share_vocab)
@@ -60,27 +100,150 @@ class CNNDataset(Text2TextDataset):
 
         return self.vocab_model
 
+    def _process(self):
+        if all([os.path.exists(processed_path) for processed_path in self.processed_file_paths.values()]):
+            if 'val_split_ratio' in self.__dict__:
+                UserWarning(
+                    "Loading existing processed files on disk. Your `val_split_ratio` might not work since the data have"
+                    "already been split.")
+            return
 
-    def parse_file(self, files):
-        with open(files, "r") as f:
-            datalist = json.load(f)
+        os.makedirs(self.processed_dir, exist_ok=True)
+
+        self.read_raw_data()
+
+        self.build_vocab()
+
+        self.vectorization(self.train)
+        self.vectorization(self.test)
+        if 'val' in self.__dict__:
+            self.vectorization(self.val)
+
+        data_to_save = {'train': self.train, 'test': self.test}
+        if 'val' in self.__dict__:
+            data_to_save['val'] = self.val
+        torch.save(data_to_save, self.processed_file_paths['data'])
+
+    def parse_file(self, file_path):
+        """
+        Read and parse the file specified by `file_path`. The file format is specified by each individual task-specific
+        base class. Returns all the indices of data items in this file w.r.t. the whole dataset.
+        For Text2TextDataset, the format of the input file should contain lines of input, each line representing one
+        record of data. The input and output is separated by a tab(\t).
+        Examples
+        --------
+        input: list job use languageid0 job ( ANS ) , language ( ANS , languageid0 )
+        DataItem: input_text="list job use languageid0", output_text="job ( ANS ) , language ( ANS , languageid0 )"
+        Parameters
+        ----------
+        file_path: str
+            The path of the input file.
+        Returns
+        -------
+        list
+            The indices of data items in the file w.r.t. the whole dataset.
+        """
         data = []
-        max_len = -1
-        for item in datalist:
-            if item[0].strip() == "" or item[1].strip() == "":
-                continue
-            input_tokens = item[0].split(" ")
-            if len(input_tokens) >= 50:
-                continue
-            max_len = max(max_len, len(input_tokens))
-            dataitem = Text2TextDataItem(input_text=item[0], output_text=item[1], tokenizer=self.tokenizer,
-                                         share_vocab=self.share_vocab)
-            data.append(dataitem)
-        print(len(data))
+        with open(file_path, 'r') as f:
+            examples = json.load(f)
+            for example_dict in examples:
+                input = ' '.join(example_dict['article'][:10])
+                output = example_dict['highlight'][0][0]
+                data_item = Text2TextDataItem_seq2seq(input_text=input,
+                                                      output_text=output,
+                                                      tokenizer=self.tokenizer,
+                                                      share_vocab=self.share_vocab)
+                data.append(data_item)
         return data
 
+    def vectorization(self, data_items):
+        for item in data_items:
+            src = item.input_text
+            src_token_id = self.vocab_model.in_word_vocab.to_index_sequence(src)
+            src_token_id.append(self.vocab_model.in_word_vocab.EOS)
+            src_token_id = np.array(src_token_id)
+            item.input_np = src_token_id
+
+            tgt = item.output_text
+            tgt_token_id = self.vocab_model.out_word_vocab.to_index_sequence(tgt)
+            tgt_token_id.append(self.vocab_model.in_word_vocab.EOS)
+            tgt_token_id = np.array(tgt_token_id)
+            item.output_np = tgt_token_id
+
     @staticmethod
-    def process(data_item, port):
+    def collate_fn(data_list: [Text2TextDataItem_seq2seq]):
+        input_numpy = [item.input_np for item in data_list]
+        src_len = [item.input_np.shape[0] for item in data_list]
+        input_pad = pad_2d_vals_no_size(input_numpy)
+
+        src_seq = torch.from_numpy(input_pad).long()
+        src_len = torch.LongTensor(src_len)
+
+        output_numpy = [item.output_np for item in data_list]
+        output_pad = pad_2d_vals_no_size(output_numpy)
+
+        tgt_seq = torch.from_numpy(output_pad).long()
+        return [src_seq, src_len, tgt_seq]
+
+
+class CNNDataset(Text2TextDataset):
+    def __init__(self, root_dir, topology_builder, topology_subdir, graph_type='static',
+                 edge_strategy=None, merge_strategy='tailhead', share_vocab=True, word_emb_size=300,
+                 dynamic_graph_type=None,
+                 dynamic_init_topology_builder=None,
+                 dynamic_init_topology_aux_args=None
+                 ):
+        super(CNNDataset, self).__init__(root_dir=root_dir,
+                                         topology_builder=topology_builder,
+                                         topology_subdir=topology_subdir,
+                                         tokenizer=None,
+                                         graph_type=graph_type,
+                                         edge_strategy=edge_strategy,
+                                         merge_strategy=merge_strategy,
+                                         share_vocab=share_vocab,
+                                         word_emb_size=word_emb_size,
+                                         dynamic_graph_type=dynamic_graph_type,
+                                         dynamic_init_topology_builder=dynamic_init_topology_builder,
+                                         dynamic_init_topology_aux_args=dynamic_init_topology_aux_args)
+
+    @property
+    def raw_file_names(self):
+        """3 reserved keys: 'train', 'val' (optional), 'test'. Represent the split of dataset."""
+        # return {'train': 'train.json', 'val': "val.json", 'test': 'test.json'}
+        # return {'train': 'train-0.json', 'val': "val-0.json", 'test': 'test-0.json'}
+        return {'train': 'train_3.json', 'val': "val_3.json", 'test': 'test_3.json'}
+
+    @property
+    def processed_file_names(self):
+        """At least 3 reserved keys should be fiiled: 'vocab', 'data' and 'split_ids'."""
+        return {'vocab': 'vocab.pt', 'data': 'data.pt'}
+
+    def download(self):
+        # raise NotImplementedError("It shouldn't be called now")
+        return
+
+    def build_vocab(self):
+        data_for_vocab = self.train
+        if self.use_val_for_vocab:
+            data_for_vocab = data_for_vocab + self.val
+
+        self.tokenizer = None
+
+        vocab_model = VocabModel.build(saved_vocab_file=self.processed_file_paths['vocab'],
+                                       data_set=data_for_vocab,
+                                       tokenizer=self.tokenizer,
+                                       lower_case=self.lower_case,
+                                       max_word_vocab_size=None,
+                                       min_word_vocab_freq=3,
+                                       pretrained_word_emb_file=self.pretrained_word_emb_file,
+                                       word_emb_size=self.word_emb_size,
+                                       share_vocab=self.share_vocab)
+        self.vocab_model = vocab_model
+
+        return self.vocab_model
+
+    @staticmethod
+    def process(topology_builder, data_item, port):
         processor_args = {
             'annotators': 'ssplit,tokenize,depparse',
             "tokenize.options":
@@ -103,7 +266,7 @@ class CNNDataset(Text2TextDataset):
                 print("Port {}, processing: {} / {}".format(port, cnt, all))
             cnt += 1
             try:
-                graph = DependencyBasedGraphConstruction.topology(raw_text_data=item.input_text,
+                graph = topology_builder.topology(raw_text_data=item.input_text,
                                                                    nlp_processor=processor, processor_args=processor_args,
                                                                    merge_strategy="tailhead",
                                                                    edge_strategy=None,
@@ -134,7 +297,7 @@ class CNNDataset(Text2TextDataset):
         for i in range(10):
             start_index = total * i // 10
             end_index = total * (i + 1) // 10
-            res_l.append(pool.apply_async(self.process, args=(data_items[start_index:end_index], 9008)))
+            res_l.append(pool.apply_async(self.process, args=(self.topology_builder, data_items[start_index:end_index], 9008)))
         pool.close()
         pool.join()
 
@@ -202,7 +365,8 @@ class CNNDataset(Text2TextDataset):
             examples = json.load(f)
             for example_dict in examples:
                 input = ' '.join(example_dict['article'][:10])
-                output = example_dict['highlight'][0][0]
+                output = ' '.join([sent[0]+' .' for sent in example_dict['highlight']])
+                # output = ' '.join(["%s %s %s" % (constants._SOS_TOKEN, sent[0], constants._EOS_TOKEN) for sent in example_dict['highlight']])
                 data_item = Text2TextDataItem(input_text=input, output_text=output, tokenizer=self.tokenizer,
                                               share_vocab=self.share_vocab)
                 data.append(data_item)
@@ -210,6 +374,19 @@ class CNNDataset(Text2TextDataset):
 
 
 if __name__ == "__main__":
+    # dataset = CNNDataset(root_dir="/raid/ghn/graph4nlp/examples/pytorch/summarization/cnn",
+    #                      topology_builder=DependencyBasedGraphConstruction,
+    #                      topology_subdir='DependencyGraph_10',
+    #                      word_emb_size=128,
+    #                      share_vocab=True)
+
     dataset = CNNDataset(root_dir="/raid/ghn/graph4nlp/examples/pytorch/summarization/cnn",
-                                 topology_builder=DependencyBasedGraphConstruction,
-                                 topology_subdir='DependencyGraph', share_vocab=True)
+                         topology_builder=LinearGraphConstruction,
+                         topology_subdir='LinearGraph',
+                         word_emb_size=128,
+                         share_vocab=True)
+
+    # dataset = CNNSeq2SeqDataset(root_dir="/raid/ghn/graph4nlp/examples/pytorch/summarization/cnn",
+    #                             topology_builder=DependencyBasedGraphConstruction,
+    #                             topology_subdir='DependencyGraph_seq2seq', share_vocab=True)
+    a  = 0

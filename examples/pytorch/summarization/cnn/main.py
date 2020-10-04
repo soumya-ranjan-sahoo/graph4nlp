@@ -1,12 +1,13 @@
 import os
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "3"
+os.environ["CUDA_VISIBLE_DEVICES"] = "2"
 # os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
 
 from .dataset import CNNDataset
 from .model import Graph2seq
 from graph4nlp.pytorch.modules.graph_construction.node_embedding_based_graph_construction import NodeEmbeddingBasedGraphConstruction
 from graph4nlp.pytorch.modules.graph_construction.dependency_graph_construction import DependencyBasedGraphConstruction
+from graph4nlp.pytorch.modules.graph_construction.linear_graph_construction import LinearGraphConstruction
 from graph4nlp.pytorch.modules.utils.vocab_utils import VocabModel
 
 import numpy as np
@@ -49,22 +50,17 @@ class CNN:
         self.logger = get_log(log_file)
 
     def _build_dataloader(self):
-
-        # dataset = CNNDataset(root_dir=self.opt.root_dir,
-        #                              topology_builder=DependencyBasedGraphConstruction,
-        #                              topology_subdir=self.opt.topology_subdir, share_vocab=False,
-        #                              word_emb_size=self.opt.word_emb_size)
-
         if self.opt.topology_subdir == 'ie':
             graph_type = 'static'
             topology_builder = IEBasedGraphConstruction
             topology_subdir = 'IEGraph'
             dynamic_graph_type = None
             dynamic_init_topology_builder = None
-        elif self.opt.topology_subdir == 'DependencyGraph':
+        # elif self.opt.topology_subdir == 'DependencyGraph3':
+        elif 'DependencyGraph' in self.opt.topology_subdir:
             graph_type = 'static'
             topology_builder = DependencyBasedGraphConstruction
-            topology_subdir = 'DependencyGraph'
+            topology_subdir = self.opt.topology_subdir
             dynamic_graph_type = None
             dynamic_init_topology_builder = None
         elif self.opt.topology_subdir == 'node_emb':
@@ -73,6 +69,12 @@ class CNN:
             topology_subdir = 'NodeEmb'
             dynamic_graph_type = 'node_emb'
             dynamic_init_topology_builder = DependencyBasedGraphConstruction
+        elif self.opt.topology_subdir == 'LinearGraph':
+            graph_type = 'static'
+            topology_builder = LinearGraphConstruction
+            topology_subdir = self.opt.topology_subdir
+            dynamic_graph_type = None
+            dynamic_init_topology_builder = None
         else:
             raise NotImplementedError()
 
@@ -91,22 +93,6 @@ class CNN:
         self.test_dataloader = DataLoader(dataset.test, batch_size=self.opt.batch_size, shuffle=False, num_workers=10,
                                           collate_fn=dataset.collate_fn)
         self.vocab: VocabModel = dataset.vocab_model
-
-        # import torchtext.vocab as vocab
-        # glove = vocab.GloVe
-        # glove.url["de"] = "/home/shiina/shiina/lib/graph4nlp/.vector_cache/glove.de.300d.txt"
-        # from .utils import get_glove_weights
-        # en = glove(name='6B', dim=300)
-        #
-        # pretrained_weight = get_glove_weights(en, self.vocab.in_word_vocab)
-        # self.vocab.in_word_vocab.embeddings = pretrained_weight.numpy()
-        # print("English word embedding loaded")
-        #
-        # de = glove(name='de', dim=300)
-        #
-        # pretrained_weight = get_glove_weights(de, self.vocab.out_word_vocab)
-        # self.vocab.out_word_vocab.embeddings = pretrained_weight.numpy()
-        # print("De word embedding loaded")
 
     def _build_model(self):
         self.model = Graph2seq(self.vocab, gnn=self.opt.gnn, device=self.device,
@@ -179,7 +165,7 @@ class CNN:
             self.optimizer.step()
 
     @torch.no_grad()
-    def evaluate(self, split="val"):
+    def evaluate(self, split="val", test_mode=False):
         self.model.eval()
         pred_collect = []
         gt_collect = []
@@ -194,6 +180,15 @@ class CNN:
             tgt_str = wordid2str(tgt, self.vocab.out_word_vocab)
             pred_collect.extend(pred_str)
             gt_collect.extend(tgt_str)
+
+        if test_mode==True:
+            with open('cnn_pred_output.txt','w+') as f:
+                for line in pred_collect:
+                    f.write(line+'\n')
+
+            with open('cnn_tgt_output.txt','w+') as f:
+                for line in gt_collect:
+                    f.write(line+'\n')
 
         score, _ = self.metrics[0].calculate_scores(ground_truth=gt_collect, predict=pred_collect)
         self.logger.info("Evaluation results in `{}` split".format(split))
@@ -214,8 +209,8 @@ if __name__ == "__main__":
     runner = CNN(opt)
     max_score = runner.train()
     print("Train finish, best val score: {:.3f}".format(max_score))
-    runner.load_checkpoint("best_all.pth")
-    runner.evaluate(split="test")
+    runner.load_checkpoint('best.pth')
+    runner.evaluate(split="test", test_mode=True)
 
 # import os
 # os.environ["CUDA_VISIBLE_DEVICES"] = "3"
