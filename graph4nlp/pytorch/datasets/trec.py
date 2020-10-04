@@ -8,16 +8,17 @@ class TrecDataset(Text2LabelDataset):
     @property
     def raw_file_names(self):
         """3 reserved keys: 'train', 'val' (optional), 'test'. Represent the split of dataset."""
-        return {'train': 'train.txt', 'test': 'test.txt'}
+        return {'train': 'train.txt', 'test': 'test.txt', 'val': 'valid.txt'}
+        # return {'train': 'train.txt', 'test': 'test.txt'}
 
     @property
     def processed_file_names(self):
         """At least 2 reserved keys should be fiiled: 'vocab' and 'data'."""
         return {'vocab': 'vocab.pt', 'data': 'data.pt'}
 
-    def download(self):
-        raise NotImplementedError(
-            'This dataset is now under test and cannot be downloaded. Please prepare the raw data yourself.')
+    # def download(self):
+    #     raise NotImplementedError(
+    #         'This dataset is now under test and cannot be downloaded. Please prepare the raw data yourself.')
 
     def __init__(self, root_dir, topology_builder=None, topology_subdir=None, graph_type='static',
                  edge_strategy=None, merge_strategy='tailhead', max_word_vocab_size=None,

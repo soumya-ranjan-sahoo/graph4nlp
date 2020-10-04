@@ -339,7 +339,7 @@ class Dataset(torch.utils.data.Dataset):
         """
         if self.graph_type == 'static':
             print('Connecting to stanfordcorenlp server...')
-            processor = stanfordcorenlp.StanfordCoreNLP('http://localhost', port=9000, timeout=1000)
+            processor = stanfordcorenlp.StanfordCoreNLP('http://localhost', port=9008, timeout=1000)
 
             if self.topology_builder == IEBasedGraphConstruction:
                 props_coref = {
