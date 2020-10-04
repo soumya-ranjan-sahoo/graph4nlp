@@ -476,5 +476,5 @@ if __name__ == '__main__':
 # screen -S ghn_code1  python -m  examples.pytorch.text_classification.run_text_classifier -config examples/pytorch/text_classification/config/CAirline/gat_undirected_constituency.yaml
 # screen -S ghn_code3 python -m  examples.pytorch.text_classification.run_text_classifier -config examples/pytorch/text_classification/config/CAirline/gat_dependency.yaml
 # screen -S ghn_code1 python -m  examples.pytorch.text_classification.run_text_classifier -config examples/pytorch/text_classification/config/CAirline/gat_undirected_dependency.yaml --grid_search
-# screen -S ghn_code1 python -m  examples.pytorch.text_classification.run_text_classifier -config examples/pytorch/text_classification/config/CAirline/gat_bi_sep_dependency.yaml
+# screen -S ghn_code1 python -m  examples.pytorch.text_classification.run_text_classifier -config examples/pytorch/text_classification/config/CAirline/gat_bi_sep_dependency.yaml --grid_search
 # screen -S ghn_code1 python -m  examples.pytorch.text_classification.run_text_classifier -config examples/pytorch/text_classification/config/CAirline/graphsage_bi_sep_node_emb.yaml
