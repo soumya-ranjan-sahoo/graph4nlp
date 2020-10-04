@@ -1,12 +1,12 @@
 # Data
 dataset: 'CAirline'
-root_dir: 'data/CAirline'
+root_dir: '/raid/ghn/graph4nlp/examples/pytorch/text_classification/data/CAirline'
 #root_dir: 'examples/pytorch/text_classification/data/CAirline'
 #root_dir: 'data/CAirline'
 #val_split_ratio: 0.2 # validation set split ratio (default: 0.2)
 pre_word_emb_file: '/raid/ghn/glove/glove.6B.300d.txt' # path to the pretrained word embedding file
-out_dir: 'out/CAirline/gat_bi_sep_dependency_ckpt'
-#out_dir: 'examples/pytorch/text_classification/out/CAirline/gat_bi_sep_dependency_ckpt'
+#out_dir: 'out/CAirline/gat_bi_sep_dependency_ckpt'
+out_dir: '/raid/ghn/graph4nlp/examples/pytorch/text_classification/out/CAirline/gat_bi_sep_dependency_ckpt'
 
 
 # Graph construction
@@ -76,10 +76,10 @@ batch_size: 50 # batch size
 #  - 32
 epochs: 500 # number of maximal training epochs
 patience: 10
-lr: 0.003 # learning rate
-#      - 0.003
-#      - 0.002
-#      - 0.001
+lr: # 0.003 # learning rate
+      - 0.003
+      - 0.002
+      - 0.001
 lr_patience: 2
 lr_reduce_factor: 0.5
 num_workers: 8 # number of data loader workers
