@@ -126,6 +126,7 @@ class Jobs:
                                           self.device, 
                                           self.embedding_style,
                                           self.criterion)
+        print(self.model)
         self.model.init(self.opt.init_weight)
         self.model.to(self.device)
 
